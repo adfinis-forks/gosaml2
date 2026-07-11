@@ -62,6 +62,7 @@ const (
 func (sp *SAMLServiceProvider) VerifyAssertionConditions(assertion *types.Assertion) (*WarningInfo, error) {
 	warningInfo := &WarningInfo{}
 	now := sp.Clock.Now()
+	clockSkew := sp.allowedClockSkew()
 
 	conditions := assertion.Conditions
 	if conditions == nil {
@@ -77,7 +78,7 @@ func (sp *SAMLServiceProvider) VerifyAssertionConditions(assertion *types.Assert
 		return nil, ErrParsing{Tag: NotBeforeAttr, Value: conditions.NotBefore, Type: "time.RFC3339"}
 	}
 
-	if now.Before(notBefore) {
+	if now.Add(clockSkew).Before(notBefore) {
 		warningInfo.InvalidTime = true
 	}
 
@@ -90,7 +91,7 @@ func (sp *SAMLServiceProvider) VerifyAssertionConditions(assertion *types.Assert
 		return nil, ErrParsing{Tag: NotOnOrAfterAttr, Value: conditions.NotOnOrAfter, Type: "time.RFC3339"}
 	}
 
-	if now.After(notOnOrAfter) {
+	if !now.Before(notOnOrAfter.Add(clockSkew)) {
 		warningInfo.InvalidTime = true
 	}
 
@@ -230,7 +231,7 @@ func (sp *SAMLServiceProvider) Validate(response *types.Response) error {
 		}
 
 		now := sp.Clock.Now()
-		if now.After(notOnOrAfter) {
+		if !now.Before(notOnOrAfter.Add(sp.allowedClockSkew())) {
 			return ErrInvalidValue{
 				Reason:   ReasonExpired,
 				Key:      NotOnOrAfterAttr,
@@ -242,6 +243,13 @@ func (sp *SAMLServiceProvider) Validate(response *types.Response) error {
 	}
 
 	return nil
+}
+
+func (sp *SAMLServiceProvider) allowedClockSkew() time.Duration {
+	if sp.ClockSkew < 0 {
+		return 0
+	}
+	return sp.ClockSkew
 }
 
 func (sp *SAMLServiceProvider) ValidateDecodedLogoutResponse(response *types.LogoutResponse) error {

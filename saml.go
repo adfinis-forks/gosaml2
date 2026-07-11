@@ -73,6 +73,10 @@ type SAMLServiceProvider struct {
 	SkipSignatureValidation bool
 	AllowMissingAttributes  bool
 	Clock                   *dsig.Clock
+	// ClockSkew is the maximum tolerance applied symmetrically to SAML
+	// protocol time conditions. It does not affect XML signing-certificate
+	// validity, which continues to use Clock without tolerance.
+	ClockSkew time.Duration
 
 	// Required encryption key and default signing key.
 	// Deprecated: Use SetSPKeyStore instead of setting or reading this field.
