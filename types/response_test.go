@@ -35,10 +35,10 @@ func TestNameIDRetainsOptionalAttributes(t *testing.T) {
 </Subject>`), &subject)
 	require.NoError(t, err)
 	require.NotNil(t, subject.NameID)
-	require.Equal(t, "https://idp.example.test", subject.NameID.NameQualifier)
-	require.Equal(t, "https://sp.example.test", subject.NameID.SPNameQualifier)
-	require.Equal(t, "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent", subject.NameID.Format)
-	require.Equal(t, "sp-local-id", subject.NameID.SPProvidedID)
+	require.Equal(t, "https://idp.example.test", *subject.NameID.NameQualifier)
+	require.Equal(t, "https://sp.example.test", *subject.NameID.SPNameQualifier)
+	require.Equal(t, "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent", *subject.NameID.Format)
+	require.Equal(t, "sp-local-id", *subject.NameID.SPProvidedID)
 	require.Equal(t, "opaque-subject", subject.NameID.Value)
 }
 
@@ -52,10 +52,10 @@ func TestNameIDAllowsOmittedOptionalAttributes(t *testing.T) {
 </Subject>`), &subject)
 	require.NoError(t, err)
 	require.NotNil(t, subject.NameID)
-	require.Empty(t, subject.NameID.NameQualifier)
-	require.Empty(t, subject.NameID.SPNameQualifier)
-	require.Empty(t, subject.NameID.Format)
-	require.Empty(t, subject.NameID.SPProvidedID)
+	require.Nil(t, subject.NameID.NameQualifier)
+	require.Nil(t, subject.NameID.SPNameQualifier)
+	require.Nil(t, subject.NameID.Format)
+	require.Nil(t, subject.NameID.SPProvidedID)
 	require.Equal(t, "opaque-subject", subject.NameID.Value)
 
 	encoded, err := xml.Marshal(subject.NameID)
@@ -64,4 +64,21 @@ func TestNameIDAllowsOmittedOptionalAttributes(t *testing.T) {
 	require.NotContains(t, string(encoded), "SPNameQualifier=")
 	require.NotContains(t, string(encoded), "Format=")
 	require.NotContains(t, string(encoded), "SPProvidedID=")
+}
+
+func TestNameIDPreservesPresentEmptyAttributes(t *testing.T) {
+	t.Parallel()
+
+	var nameID NameID
+	err := xml.Unmarshal([]byte(`<NameID xmlns="urn:oasis:names:tc:SAML:2.0:assertion" NameQualifier="" SPProvidedID="">opaque-subject</NameID>`), &nameID)
+	require.NoError(t, err)
+	require.NotNil(t, nameID.NameQualifier)
+	require.Empty(t, *nameID.NameQualifier)
+	require.NotNil(t, nameID.SPProvidedID)
+	require.Empty(t, *nameID.SPProvidedID)
+
+	encoded, err := xml.Marshal(nameID)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `NameQualifier=""`)
+	require.Contains(t, string(encoded), `SPProvidedID=""`)
 }
