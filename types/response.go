@@ -109,8 +109,12 @@ type AuthnContextClassRef struct {
 }
 
 type NameID struct {
-	XMLName xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:assertion NameID"`
-	Value   string   `xml:",chardata"`
+	XMLName         xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:assertion NameID"`
+	NameQualifier   string   `xml:"NameQualifier,attr,omitempty"`
+	SPNameQualifier string   `xml:"SPNameQualifier,attr,omitempty"`
+	Format          string   `xml:"Format,attr,omitempty"`
+	SPProvidedID    string   `xml:"SPProvidedID,attr,omitempty"`
+	Value           string   `xml:",chardata"`
 }
 
 type SubjectConfirmation struct {
