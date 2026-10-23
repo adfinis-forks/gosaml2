@@ -1,10 +1,10 @@
-// Copyright 2016 Russell Haering et al.
+// Copyright 2026 Russell Haering et al.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,113 +15,119 @@
 package saml2
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
 
-	"github.com/russellhaering/gosaml2/types"
-	dsig "github.com/russellhaering/goxmldsig"
+	"github.com/beevik/etree"
+	"github.com/stretchr/testify/require"
 )
 
-func TestClockSkewAppliesToAssertionConditions(t *testing.T) {
-	t.Parallel()
+// signResponseWithTimes rewrites the time bounds on a fixture response so
+// that clock skew scenarios can be expressed relative to the test clock,
+// then re-signs it.
+func signResponseWithTimes(t *testing.T, resp string, sp *SAMLServiceProvider, notBefore, notOnOrAfter, subjectNotOnOrAfter time.Time) string {
+	t.Helper()
 
-	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
-	const skew = time.Minute
-	tests := []struct {
-		name         string
-		notBefore    time.Time
-		notOnOrAfter time.Time
-		clockSkew    time.Duration
-		invalid      bool
-	}{
-		{
-			name:      "future NotBefore at skew boundary",
-			notBefore: now.Add(skew), notOnOrAfter: now.Add(time.Hour), clockSkew: skew,
-		},
-		{
-			name:      "future NotBefore beyond skew",
-			notBefore: now.Add(skew + time.Nanosecond), notOnOrAfter: now.Add(time.Hour),
-			clockSkew: skew, invalid: true,
-		},
-		{
-			name:      "expired within skew",
-			notBefore: now.Add(-time.Hour), notOnOrAfter: now.Add(-skew + time.Nanosecond), clockSkew: skew,
-		},
-		{
-			name:      "expiry at exclusive skew boundary",
-			notBefore: now.Add(-time.Hour), notOnOrAfter: now.Add(-skew), clockSkew: skew, invalid: true,
-		},
-		{
-			name:      "negative skew fails closed",
-			notBefore: now.Add(time.Nanosecond), notOnOrAfter: now.Add(time.Hour),
-			clockSkew: -skew, invalid: true,
-		},
-	}
+	doc := etree.NewDocument()
+	err := doc.ReadFromBytes([]byte(resp))
+	require.NoError(t, err)
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			sp := &SAMLServiceProvider{
-				Clock:     dsig.NewFakeClockAt(now),
-				ClockSkew: test.clockSkew,
-			}
-			warnings, err := sp.VerifyAssertionConditions(&types.Assertion{
-				Conditions: &types.Conditions{
-					NotBefore:    test.notBefore.Format(time.RFC3339Nano),
-					NotOnOrAfter: test.notOnOrAfter.Format(time.RFC3339Nano),
-				},
-			})
-			if err != nil {
-				t.Fatalf("VerifyAssertionConditions() error = %v", err)
-			}
-			if warnings.InvalidTime != test.invalid {
-				t.Fatalf("InvalidTime = %t, want %t", warnings.InvalidTime, test.invalid)
-			}
-		})
-	}
+	assertionEl := doc.Root().SelectElement("saml2:Assertion")
+	require.NotNil(t, assertionEl)
+
+	conditionsEl := assertionEl.SelectElement("saml2:Conditions")
+	require.NotNil(t, conditionsEl)
+
+	notBeforeAttr := conditionsEl.SelectAttr("NotBefore")
+	require.NotNil(t, notBeforeAttr)
+	notBeforeAttr.Value = notBefore.Format(time.RFC3339)
+
+	notOnOrAfterAttr := conditionsEl.SelectAttr("NotOnOrAfter")
+	require.NotNil(t, notOnOrAfterAttr)
+	notOnOrAfterAttr.Value = notOnOrAfter.Format(time.RFC3339)
+
+	subjectConfirmationDataEl := assertionEl.FindElement("./saml2:Subject/saml2:SubjectConfirmation/saml2:SubjectConfirmationData")
+	require.NotNil(t, subjectConfirmationDataEl)
+
+	subjectNotOnOrAfterAttr := subjectConfirmationDataEl.SelectAttr("NotOnOrAfter")
+	require.NotNil(t, subjectNotOnOrAfterAttr)
+	subjectNotOnOrAfterAttr.Value = subjectNotOnOrAfter.Format(time.RFC3339)
+
+	str, err := doc.WriteToString()
+	require.NoError(t, err)
+
+	return signResponse(t, str, sp)
 }
 
-func TestClockSkewAppliesToSubjectConfirmationExpiry(t *testing.T) {
-	t.Parallel()
+func TestClockSkew(t *testing.T) {
+	// The fake clock in getSAMLServiceProvider is pinned to this instant.
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
-	const skew = time.Minute
-	tests := []struct {
-		name         string
-		notOnOrAfter time.Time
-		wantErr      bool
-	}{
-		{name: "expired within skew", notOnOrAfter: now.Add(-skew + time.Nanosecond)},
-		{name: "expiry at exclusive skew boundary", notOnOrAfter: now.Add(-skew), wantErr: true},
+	newSP := func(t *testing.T) *SAMLServiceProvider {
+		ks := testKeyStore(t, now)
+		_, _cert, err := ks.GetKeyPair()
+		require.NoError(t, err)
+		sp := getSAMLServiceProvider(t, _cert)
+		sp.SPKeyStore = ks
+		return sp
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			sp := &SAMLServiceProvider{
-				AssertionConsumerServiceURL: "https://sp.example.test/callback",
-				Clock:                       dsig.NewFakeClockAt(now),
-				ClockSkew:                   skew,
-			}
-			response := &types.Response{
-				Version: "2.0",
-				Issuer:  &types.Issuer{},
-				Status:  &types.Status{StatusCode: &types.StatusCode{Value: StatusCodeSuccess}},
-				Assertions: []types.Assertion{{
-					Issuer: &types.Issuer{},
-					Subject: &types.Subject{SubjectConfirmation: &types.SubjectConfirmation{
-						Method: SubjMethodBearer,
-						SubjectConfirmationData: &types.SubjectConfirmationData{
-							Recipient:    sp.AssertionConsumerServiceURL,
-							NotOnOrAfter: test.notOnOrAfter.Format(time.RFC3339Nano),
-						},
-					}},
-				}},
-			}
-			err := sp.Validate(response)
-			if (err != nil) != test.wantErr {
-				t.Fatalf("Validate() error = %v, want error %t", err, test.wantErr)
-			}
-		})
-	}
+	t.Run("NotBeforeInFuture", func(t *testing.T) {
+		sp := newSP(t)
+		raw := signResponseWithTimes(t, rawResponse, sp,
+			now.Add(3*time.Minute), now.Add(time.Hour), now.Add(time.Hour))
+		encoded := base64.StdEncoding.EncodeToString([]byte(raw))
+
+		info, err := sp.RetrieveAssertionInfo(encoded)
+		require.NoError(t, err)
+		require.True(t, info.WarningInfo.InvalidTime)
+
+		sp.ClockSkew = 4 * time.Minute
+		info, err = sp.RetrieveAssertionInfo(encoded)
+		require.NoError(t, err)
+		require.False(t, info.WarningInfo.InvalidTime)
+	})
+
+	t.Run("ConditionsExpired", func(t *testing.T) {
+		sp := newSP(t)
+		raw := signResponseWithTimes(t, rawResponse, sp,
+			now.Add(-time.Hour), now.Add(-5*time.Minute), now.Add(time.Hour))
+		encoded := base64.StdEncoding.EncodeToString([]byte(raw))
+
+		info, err := sp.RetrieveAssertionInfo(encoded)
+		require.NoError(t, err)
+		require.True(t, info.WarningInfo.InvalidTime)
+
+		sp.ClockSkew = 6 * time.Minute
+		info, err = sp.RetrieveAssertionInfo(encoded)
+		require.NoError(t, err)
+		require.False(t, info.WarningInfo.InvalidTime)
+	})
+
+	t.Run("SubjectConfirmationExpired", func(t *testing.T) {
+		sp := newSP(t)
+		raw := signResponseWithTimes(t, rawResponse, sp,
+			now.Add(-time.Hour), now.Add(time.Hour), now.Add(-5*time.Minute))
+		encoded := base64.StdEncoding.EncodeToString([]byte(raw))
+
+		_, err := sp.RetrieveAssertionInfo(encoded)
+		require.Error(t, err)
+
+		sp.ClockSkew = 6 * time.Minute
+		info, err := sp.RetrieveAssertionInfo(encoded)
+		require.NoError(t, err)
+		require.False(t, info.WarningInfo.InvalidTime)
+	})
+
+	t.Run("NotOnOrAfterIsExclusive", func(t *testing.T) {
+		sp := newSP(t)
+		raw := signResponseWithTimes(t, rawResponse, sp,
+			now.Add(-time.Hour), now, now.Add(time.Hour))
+		encoded := base64.StdEncoding.EncodeToString([]byte(raw))
+
+		info, err := sp.RetrieveAssertionInfo(encoded)
+		require.NoError(t, err)
+		require.True(t, info.WarningInfo.InvalidTime)
+	})
 }

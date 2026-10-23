@@ -240,6 +240,7 @@ func testSAMLServiceProvider(t *testing.T, sp *SAMLServiceProvider) {
 	require.Nil(t, assertionInfo.WarningInfo.ProxyRestriction)
 
 	require.Equal(t, "phoebe.simon@scaleft.com", assertionInfo.NameID)
+	require.Equal(t, "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress", assertionInfo.NameIDFormat)
 	require.Equal(t, "phoebe.simon@scaleft.com", assertionInfo.Values.Get("Email"))
 	require.Equal(t, "Phoebe", assertionInfo.Values.Get("FirstName"))
 	require.Equal(t, "Simon", assertionInfo.Values.Get("LastName"))
@@ -416,10 +417,20 @@ func TestSAMLCommentInjection(t *testing.T) {
 	*/
 
 	// To show that we are not vulnerable, we want to prove that we get the canonicalized value using our parser
-	_, el, err := parseResponse([]byte(commentInjectionAttackResponse), 0)
+	_, el, err := parseResponse([]byte(commentInjectionAttackResponse), 0, 0)
 	require.NoError(t, err)
 	decodedResponse := &types.Response{}
 	err = xmlUnmarshalElement(el, decodedResponse)
 	require.NoError(t, err)
 	require.Equal(t, "phoebe.simon@scaleft.com.evil.com", decodedResponse.Assertions[0].Subject.NameID.Value, "The full, canonacalized NameID should be returned.")
+}
+
+func TestNameIDFormat(t *testing.T) {
+	_, el, err := parseResponse([]byte(rawResponse), 0, 0)
+	require.NoError(t, err)
+	decodedResponse := &types.Response{}
+	err = xmlUnmarshalElement(el, decodedResponse)
+	require.NoError(t, err)
+	require.Equal(t, "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress", *decodedResponse.Assertions[0].Subject.NameID.Format)
+	require.Equal(t, "phoebe.simon@scaleft.com", decodedResponse.Assertions[0].Subject.NameID.Value)
 }

@@ -176,6 +176,10 @@ type AttributeValue struct {
 	XMLName xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:assertion AttributeValue"`
 	Type    string   `xml:"xsi:type,attr"`
 	Value   string   `xml:",chardata"`
+	// NameID is set when the attribute value is a NameID element rather than
+	// text content, as with eduPersonTargetedID. In that case Value holds only
+	// surrounding whitespace, if anything.
+	NameID *NameID `xml:"NameID"`
 }
 
 type AuthnStatement struct {

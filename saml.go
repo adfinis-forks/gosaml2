@@ -73,9 +73,11 @@ type SAMLServiceProvider struct {
 	SkipSignatureValidation bool
 	AllowMissingAttributes  bool
 	Clock                   *dsig.Clock
-	// ClockSkew is the maximum tolerance applied symmetrically to SAML
-	// protocol time conditions. It does not affect XML signing-certificate
-	// validity, which continues to use Clock without tolerance.
+	// ClockSkew is the tolerance applied to time-based validation of
+	// assertions (the Conditions NotBefore and NotOnOrAfter bounds, and the
+	// SubjectConfirmationData NotOnOrAfter bound) to accommodate clock drift
+	// between the identity provider and this service provider. The zero value
+	// applies no tolerance.
 	ClockSkew time.Duration
 
 	// Required encryption key and default signing key.
@@ -93,6 +95,12 @@ type SAMLServiceProvider struct {
 	// SAML document will be decompressed. If a compresed document is exceeds
 	// this size during decompression an error will be returned.
 	MaximumDecompressedBodySize int64
+
+	// MaximumXMLTokens bounds the number of XML tokens allowed in a decoded
+	// document. If 0, a default of 50000 is used. IdPs that emit very large
+	// attribute lists (e.g. group memberships with thousands of values) may
+	// need to raise this.
+	MaximumXMLTokens int64
 
 	signingContextMu sync.RWMutex
 	signingContext   *dsig.SigningContext
@@ -382,6 +390,7 @@ type WarningInfo struct {
 
 type AssertionInfo struct {
 	NameID                     string
+	NameIDFormat               string
 	Values                     Values
 	WarningInfo                *WarningInfo
 	SessionIndex               string
